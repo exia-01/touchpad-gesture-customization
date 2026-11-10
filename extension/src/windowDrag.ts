@@ -1,4 +1,5 @@
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -29,6 +30,9 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _dragX = 0;
     private _dragY = 0;
     private _scale = 1;
+    private _restoring = false;
+    private _sizeChangedId = 0;
+    private _restoreTimeoutId = 0;
 
     constructor(nfingers: number[]) {
         this._nfingers = nfingers;
@@ -46,6 +50,7 @@ export class WindowDragGestureExtension implements ISubExtension {
             global.stage.disconnect(this._captureId);
             this._captureId = 0;
         }
+        this._cancelRestore();
         this._window = undefined;
     }
 
@@ -59,6 +64,7 @@ export class WindowDragGestureExtension implements ISubExtension {
         const phase = event.get_gesture_phase();
         if (phase === Clutter.TouchpadGesturePhase.BEGIN) {
             this._state = State.NONE;
+            this._cancelRestore();
             this._window = undefined;
         }
 
@@ -113,12 +119,14 @@ export class WindowDragGestureExtension implements ISubExtension {
                     TouchpadConstants.WINDOW_DRAG_MULTIPLIER;
                 this._dragX += dx * speed;
                 this._dragY += dy * speed;
-                this._moveWindow();
+                // while a maximized window is being restored, just collect the movement
+                if (!this._restoring) this._moveWindow();
                 break;
             }
             case Clutter.TouchpadGesturePhase.END:
             case Clutter.TouchpadGesturePhase.CANCEL:
                 this._state = State.NONE;
+                this._cancelRestore();
                 this._window = undefined;
                 break;
         }
@@ -128,26 +136,63 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _beginDrag(): boolean {
         const window = global.display.get_focus_window() as Meta.Window | null;
 
-        // maximized/fullscreen windows can't be moved
-        if (
-            !window ||
-            window.is_fullscreen() ||
-            window.is_maximized() ||
-            !window.allows_move()
-        )
+        // fullscreen windows can't be moved
+        if (!window || window.is_fullscreen() || !window.allows_move())
             return false;
 
-        const rect = window.get_frame_rect();
         this._window = window;
-        this._startX = rect.x;
-        this._startY = rect.y;
         this._dragX = 0;
         this._dragY = 0;
+        if (window.is_maximized()) {
+            // restore first; the drag starts from wherever the restored window lands
+            this._restoring = true;
+            this._sizeChangedId = window.connect('size-changed', () =>
+                this._finishRestore()
+            );
+            this._restoreTimeoutId = GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                250,
+                () => {
+                    this._restoreTimeoutId = 0;
+                    this._finishRestore();
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+            window.unmaximize();
+        } else {
+            this._setStartPosition(window);
+        }
         // same speed on both axes: a full touchpad width moves the window one monitor width
         this._scale =
             global.display.get_monitor_geometry(window.get_monitor()).width /
             TouchpadConstants.TOUCHPAD_BASE_WIDTH;
         return true;
+    }
+
+    private _setStartPosition(window: Meta.Window) {
+        const rect = window.get_frame_rect();
+        this._startX = rect.x;
+        this._startY = rect.y;
+    }
+
+    private _finishRestore() {
+        const window = this._window;
+        this._cancelRestore();
+        if (!window) return;
+        this._setStartPosition(window);
+        this._moveWindow();
+    }
+
+    private _cancelRestore() {
+        if (this._sizeChangedId) {
+            this._window?.disconnect(this._sizeChangedId);
+            this._sizeChangedId = 0;
+        }
+        if (this._restoreTimeoutId) {
+            GLib.source_remove(this._restoreTimeoutId);
+            this._restoreTimeoutId = 0;
+        }
+        this._restoring = false;
     }
 
     private _moveWindow() {
