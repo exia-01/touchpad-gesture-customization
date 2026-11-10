@@ -307,6 +307,20 @@
                     </object>
                 </child>
 
+                <!-- Tile gesture moves workspace -->
+                <child>
+                    <object class="AdwActionRow">
+                        <property name="title" translatable="yes">Move window to another workspace instead of tiling</property>
+                        <property name="subtitle">After swiping down, swipe left/right to move the window to the previous/next workspace instead of tiling it</property>
+                        <child>
+                            <object class="GtkSwitch" id="tile-gesture-moves-workspace">
+                                <property name="valign">center</property>
+                                <property name="active">True</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
                 <!-- Fullscreen window -->
                 <child>
                     <object class="AdwActionRow">

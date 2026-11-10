@@ -146,7 +146,17 @@ const TilePreview = GObject.registerClass(
 
                     // snap-left,normal,snap-right
                     else {
-                        if (state !== GestureTileState.NORMAL) {
+                        if (
+                            state !== GestureTileState.NORMAL &&
+                            ExtSettings.TILE_GESTURE_MOVES_WORKSPACE
+                        ) {
+                            this._moveToNeighborWorkspace(
+                                this._window,
+                                state === GestureTileState.LEFT_TILE
+                                    ? Meta.MotionDirection.LEFT
+                                    : Meta.MotionDirection.RIGHT
+                            );
+                        } else if (state !== GestureTileState.NORMAL) {
                             const keys = [
                                 Clutter.KEY_Super_L,
                                 state === GestureTileState.LEFT_TILE
@@ -196,7 +206,10 @@ const TilePreview = GObject.registerClass(
             } else {
                 startBox = this._normalBox;
 
-                if (progress >= GestureTileState.NORMAL) {
+                if (ExtSettings.TILE_GESTURE_MOVES_WORKSPACE) {
+                    // no tile preview: the window is moved to another workspace instead
+                    endBox = startBox;
+                } else if (progress >= GestureTileState.NORMAL) {
                     endBox = this._leftSnapBox;
                 } else {
                     endBox = this._rightSnapBox;
@@ -220,6 +233,18 @@ const TilePreview = GObject.registerClass(
 
             this.set_position(x, y);
             this.set_size(width, height);
+        }
+
+        _moveToNeighborWorkspace(
+            window: Meta.Window,
+            direction: Meta.MotionDirection
+        ): void {
+            if (window.on_all_workspaces) return;
+            const neighbor = window.get_workspace().get_neighbor(direction);
+            if (!neighbor || neighbor === window.get_workspace()) return;
+            window.change_workspace(neighbor);
+            // follow the window so it doesn't disappear from view
+            neighbor.activate_with_focus(window, global.get_current_time());
         }
 
         switchToSnapping(value: GestureTileState): void {

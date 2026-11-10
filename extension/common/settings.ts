@@ -68,6 +68,7 @@ export enum ForwardBackKeyBinds {
 
 export type BooleanSettingsKeys =
     | 'allow-minimize-window'
+    | 'tile-gesture-moves-workspace'
     | 'allow-fullscreen-window'
     | 'alttab-all-workspaces'
     | 'follow-natural-scroll'

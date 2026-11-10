@@ -43,6 +43,7 @@ export const OverviewControlsState = {
 
 export const ExtSettings = {
     ALLOW_MINIMIZE_WINDOW: false,
+    TILE_GESTURE_MOVES_WORKSPACE: true,
     ALLOW_FULLSCREEN_WINDOW: true,
     ALTTAB_ALL_WORKSPACES: false,
     FOLLOW_NATURAL_SCROLL: true,

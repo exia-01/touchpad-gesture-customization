@@ -548,6 +548,8 @@ export default class TouchpadGestureCustomization extends Extension {
         if (this.settings) {
             Constants.ExtSettings.ALLOW_MINIMIZE_WINDOW =
                 this.settings.get_boolean('allow-minimize-window');
+            Constants.ExtSettings.TILE_GESTURE_MOVES_WORKSPACE =
+                this.settings.get_boolean('tile-gesture-moves-workspace');
             Constants.ExtSettings.ALLOW_FULLSCREEN_WINDOW =
                 this.settings.get_boolean('allow-fullscreen-window');
             Constants.ExtSettings.ALTTAB_ALL_WORKSPACES =
