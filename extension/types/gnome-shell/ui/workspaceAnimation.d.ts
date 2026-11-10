@@ -24,5 +24,6 @@ declare module 'resource:///org/gnome/shell/ui/workspaceAnimation.js' {
         ): void;
 
         _movingWindow: Meta.Window;
+        movingWindow: Meta.Window | null;
     }
 }

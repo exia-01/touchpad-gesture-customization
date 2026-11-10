@@ -242,7 +242,11 @@ const TilePreview = GObject.registerClass(
             if (window.on_all_workspaces) return;
             const neighbor = window.get_workspace().get_neighbor(direction);
             if (!neighbor || neighbor === window.get_workspace()) return;
+            // same as GNOME's own move-window-to-workspace: tell the workspace switch
+            // animation which window is moving so it is carried along with the slide
+            Main.wm._workspaceAnimation.movingWindow = window;
             window.change_workspace(neighbor);
+            global.display.clear_mouse_mode();
             // follow the window so it doesn't disappear from view
             neighbor.activate_with_focus(window, global.get_current_time());
         }
