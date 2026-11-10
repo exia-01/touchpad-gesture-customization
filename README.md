@@ -25,7 +25,7 @@ This extension modifies and extends existing touchpad gestures on GNOME using Wa
 1. Install extension
 
 ```
-git clone [https://github.com/HieuTNg/touchpad-gesture-customization](https://github.com/exia-01/touchpad-gesture-customization).git
+git clone https://github.com/exia-01/touchpad-gesture-customization.git
 cd touchpad-gesture-customization
 npm install
 npm run update
