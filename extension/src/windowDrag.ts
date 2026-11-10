@@ -5,6 +5,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {CustomEventType} from 'resource:///org/gnome/shell/ui/swipeTracker.js';
 import {TouchpadConstants} from '../constants.js';
+import {getWindowUnderPointer} from './utils/windowUnderPointer.js';
 
 enum State {
     NONE = 0,
@@ -133,27 +134,8 @@ export class WindowDragGestureExtension implements ISubExtension {
         return Clutter.EVENT_STOP;
     }
 
-    // topmost window under the pointer (the swipe doesn't move it), not the focused one
-    private _getWindowUnderPointer(): Meta.Window | null {
-        const [x, y] = global.get_pointer();
-        let actor: Clutter.Actor | null = global.stage.get_actor_at_pos(
-            Clutter.PickMode.REACTIVE,
-            x,
-            y
-        );
-        while (actor && !(actor as Meta.WindowActor).meta_window)
-            actor = actor.get_parent();
-
-        const window = (actor as Meta.WindowActor | null)?.meta_window;
-        if (!window) return null;
-        const type = window.get_window_type();
-        if (type === Meta.WindowType.DESKTOP || type === Meta.WindowType.DOCK)
-            return null;
-        return window;
-    }
-
     private _beginDrag(): boolean {
-        const window = this._getWindowUnderPointer();
+        const window = getWindowUnderPointer();
 
         // fullscreen windows report allows_move() == false until they are restored
         if (!window || (!window.is_fullscreen() && !window.allows_move()))

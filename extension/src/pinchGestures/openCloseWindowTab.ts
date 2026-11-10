@@ -1,4 +1,5 @@
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -9,6 +10,7 @@ import {WIDGET_SHOWING_DURATION} from '../../constants.js';
 import {TouchpadPinchGesture} from './pinchTracker.js';
 import {easeActor} from '../utils/environment.js';
 import {getVirtualKeyboard, IVirtualKeyboard} from '../utils/keyboard.js';
+import {getWindowUnderPointer} from '../utils/windowUnderPointer.js';
 
 const END_OPACITY = 0;
 const PINCH_THRESHOLD = 0.02;
@@ -40,7 +42,7 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
     private _keyboard: IVirtualKeyboard;
     private _pinchTracker: Type_TouchpadPinchGesture;
     private _preview: St.Widget;
-    private _focusWindow?: Meta.Window | null;
+    private _targetWindow?: Meta.Window | null;
     private _activePinchAnimation:
         | typeof PINCH_IN_ANIMATION
         | typeof PINCH_OUT_ANIMATION
@@ -84,11 +86,11 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
         this._activePinchAnimation = null;
 
         // if we are currently in middle of animations, ignore this event
-        if (this._focusWindow) return;
+        if (this._targetWindow) return;
 
-        this._focusWindow =
-            global.display.get_focus_window() as Meta.Window | null;
-        if (!this._focusWindow) return;
+        // the window under the cursor, not the focused one
+        this._targetWindow = getWindowUnderPointer();
+        if (!this._targetWindow) return;
 
         tracker.confirmPinch(
             0,
@@ -100,7 +102,7 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
             OpenCloseWindowTabGestureState.DEFAULT
         );
 
-        const frame = this._focusWindow.get_frame_rect();
+        const frame = this._targetWindow.get_frame_rect();
         this._preview.set_position(frame.x, frame.y);
         this._preview.set_size(frame.width, frame.height);
     }
@@ -180,21 +182,21 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
                     progress == OpenCloseWindowTabGestureState.PINCH_OUT &&
                     this._activePinchAnimation == PINCH_OUT_ANIMATION
                 ) {
-                    if (this._focusWindow) {
+                    if (this._targetWindow) {
                         const windowTracker = Shell.WindowTracker.get_default();
-                        const focusApp = windowTracker.get_window_app(
-                            this._focusWindow
+                        const targetApp = windowTracker.get_window_app(
+                            this._targetWindow
                         );
 
-                        if (focusApp) {
-                            focusApp.open_new_window(-1);
+                        if (targetApp) {
+                            targetApp.open_new_window(-1);
                         }
                     }
                 } else if (
                     progress == OpenCloseWindowTabGestureState.PINCH_IN &&
                     this._activePinchAnimation == PINCH_IN_ANIMATION
                 ) {
-                    this._focusWindow?.delete?.(global.get_current_time());
+                    this._targetWindow?.delete?.(global.get_current_time());
                 }
 
                 break;
@@ -204,7 +206,7 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
                     progress == OpenCloseWindowTabGestureState.PINCH_OUT &&
                     this._activePinchAnimation == PINCH_OUT_ANIMATION
                 ) {
-                    this._keyboard.sendKeys([
+                    this._sendKeysToTargetWindow([
                         Clutter.KEY_Control_L,
                         Clutter.KEY_t,
                     ]);
@@ -212,11 +214,26 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
                     progress == OpenCloseWindowTabGestureState.PINCH_IN &&
                     this._activePinchAnimation == PINCH_IN_ANIMATION
                 ) {
-                    this._keyboard.sendKeys([
+                    this._sendKeysToTargetWindow([
                         Clutter.KEY_Control_L,
                         Clutter.KEY_w,
                     ]);
                 }
+        }
+    }
+
+    // keystrokes go to the focused window, so focus the one under the cursor first
+    private _sendKeysToTargetWindow(keys: number[]) {
+        const window = this._targetWindow;
+        if (window && window !== global.display.get_focus_window()) {
+            Main.activateWindow(window);
+            // give the new focus a moment to reach the client before typing
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                this._keyboard.sendKeys(keys);
+                return GLib.SOURCE_REMOVE;
+            });
+        } else {
+            this._keyboard.sendKeys(keys);
         }
     }
 
@@ -247,6 +264,6 @@ export class OpenCloseWindowTabExtension implements ISubExtension {
         this._preview.opacity = 0;
         this._preview.set_scale(1, 1);
 
-        this._focusWindow = undefined;
+        this._targetWindow = undefined;
     }
 }
