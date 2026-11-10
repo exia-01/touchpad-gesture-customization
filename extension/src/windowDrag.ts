@@ -143,7 +143,7 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._window = window;
         this._dragX = 0;
         this._dragY = 0;
-        if (window.is_fullscreen() || window.is_maximized()) {
+        if (this._needsRestore(window)) {
             // restore first; the drag starts from wherever the restored window lands
             this._restoring = true;
             this._sizeChangedId = window.connect('size-changed', () =>
@@ -180,13 +180,25 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _restoreStep(window: Meta.Window) {
         if (window.is_fullscreen()) window.unmake_fullscreen();
         else if (window.is_maximized()) window.unmaximize();
+        else if (this._needsRestore(window))
+            window.set_unmaximize_flags(Meta.MaximizeFlags.BOTH);
+    }
+
+    // fullscreen, maximized or tiled; a half-screen tile is a one-axis maximize flag
+    // so is_maximized() alone misses it
+    private _needsRestore(window: Meta.Window): boolean {
+        return (
+            window.is_fullscreen() ||
+            window.is_maximized() ||
+            window.get_maximize_flags() !== Meta.MaximizeFlags.NONE
+        );
     }
 
     private _finishRestore() {
         const window = this._window;
         if (
             window &&
-            (window.is_fullscreen() || window.is_maximized()) &&
+            this._needsRestore(window) &&
             this._restoreTimeoutId
         ) {
             this._restoreStep(window);
