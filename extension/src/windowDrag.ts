@@ -136,7 +136,9 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _beginDrag(): boolean {
         const window = global.display.get_focus_window() as Meta.Window | null;
 
-        if (!window || !window.allows_move()) return false;
+        // fullscreen windows report allows_move() == false until they are restored
+        if (!window || (!window.is_fullscreen() && !window.allows_move()))
+            return false;
 
         this._window = window;
         this._dragX = 0;
