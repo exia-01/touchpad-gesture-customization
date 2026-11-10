@@ -136,14 +136,12 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _beginDrag(): boolean {
         const window = global.display.get_focus_window() as Meta.Window | null;
 
-        // fullscreen windows can't be moved
-        if (!window || window.is_fullscreen() || !window.allows_move())
-            return false;
+        if (!window || !window.allows_move()) return false;
 
         this._window = window;
         this._dragX = 0;
         this._dragY = 0;
-        if (window.is_maximized()) {
+        if (window.is_fullscreen() || window.is_maximized()) {
             // restore first; the drag starts from wherever the restored window lands
             this._restoring = true;
             this._sizeChangedId = window.connect('size-changed', () =>
@@ -158,7 +156,7 @@ export class WindowDragGestureExtension implements ISubExtension {
                     return GLib.SOURCE_REMOVE;
                 }
             );
-            window.unmaximize();
+            this._restoreStep(window);
         } else {
             this._setStartPosition(window);
         }
@@ -175,8 +173,23 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._startY = rect.y;
     }
 
+    // leave fullscreen, then maximized; a fullscreen window that was maximized
+    // before goes back to maximized, so this runs again after each size change
+    private _restoreStep(window: Meta.Window) {
+        if (window.is_fullscreen()) window.unmake_fullscreen();
+        else if (window.is_maximized()) window.unmaximize();
+    }
+
     private _finishRestore() {
         const window = this._window;
+        if (
+            window &&
+            (window.is_fullscreen() || window.is_maximized()) &&
+            this._restoreTimeoutId
+        ) {
+            this._restoreStep(window);
+            return;
+        }
         this._cancelRestore();
         if (!window) return;
         this._setStartPosition(window);
