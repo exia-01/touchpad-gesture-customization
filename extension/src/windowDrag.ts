@@ -31,6 +31,9 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _dragX = 0;
     private _dragY = 0;
     private _scale = 1;
+    private _pointer?: Clutter.VirtualInputDevice;
+    private _pointerOffsetX = 0;
+    private _pointerOffsetY = 0;
     private _restoring = false;
     private _sizeChangedId = 0;
     private _restoreTimeoutId = 0;
@@ -53,6 +56,7 @@ export class WindowDragGestureExtension implements ISubExtension {
         }
         this._cancelRestore();
         this._window = undefined;
+        this._pointer = undefined;
     }
 
     private _handleEvent(
@@ -174,6 +178,18 @@ export class WindowDragGestureExtension implements ISubExtension {
         const rect = window.get_frame_rect();
         this._startX = rect.x;
         this._startY = rect.y;
+
+        // the pointer keeps its place relative to the window (pulled inside it
+        // if the restored window no longer covers the pointer)
+        const [px, py] = global.get_pointer();
+        this._pointerOffsetX = Math.min(
+            Math.max(px - rect.x, 0),
+            rect.width - 1
+        );
+        this._pointerOffsetY = Math.min(
+            Math.max(py - rect.y, 0),
+            rect.height - 1
+        );
     }
 
     // leave fullscreen, then maximized; a fullscreen window that was maximized
@@ -242,5 +258,16 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._dragX = x - this._startX;
         this._dragY = y - this._startY;
         window.move_frame(true, Math.round(x), Math.round(y));
+
+        // the cursor travels with the window
+        this._pointer ??= global.stage.context
+            .get_backend()
+            .get_default_seat()
+            .create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        this._pointer.notify_absolute_motion(
+            GLib.get_monotonic_time(),
+            Math.round(x) + this._pointerOffsetX,
+            Math.round(y) + this._pointerOffsetY
+        );
     }
 }
