@@ -1,4 +1,5 @@
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import Mtk from 'gi://Mtk';
@@ -11,6 +12,7 @@ import {ExtSettings} from '../constants.js';
 import {createSwipeTracker, TouchpadSwipeGesture} from './swipeTracker.js';
 import {easeActor, easeAdjustment} from './utils/environment.js';
 import {getVirtualKeyboard, IVirtualKeyboard} from './utils/keyboard.js';
+import {getWindowUnderPointer} from './utils/windowUnderPointer.js';
 
 const WINDOW_ANIMATION_TIME = 250;
 const UPDATED_WINDOW_ANIMATION_TIME = 150;
@@ -163,7 +165,14 @@ const TilePreview = GObject.registerClass(
                                     ? Clutter.KEY_Left
                                     : Clutter.KEY_Right,
                             ];
-                            this._virtualDevice.sendKeys(keys);
+                            // Super+Left/Right acts on the focused window, so focus this one first
+                            const window = this._window;
+                            if (window !== global.display.get_focus_window())
+                                Main.activateWindow(window);
+                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                                this._virtualDevice.sendKeys(keys);
+                                return GLib.SOURCE_REMOVE;
+                            });
                         }
                     }
                 }
@@ -387,7 +396,8 @@ export class SnapWindowExtension implements ISubExtension {
         tracker: typeof SwipeTracker.prototype,
         monitor: number
     ): void {
-        const window = global.display.get_focus_window() as Meta.Window | null;
+        // the window under the cursor, not the focused one
+        const window = getWindowUnderPointer();
 
         // fullscreen window's can't be maximized :O
         // if window can't be maximized and window is not fullscreen, return
