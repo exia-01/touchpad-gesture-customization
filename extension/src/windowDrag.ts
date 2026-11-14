@@ -1,11 +1,19 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Mtk from 'gi://Mtk';
+import St from 'gi://St';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {CustomEventType} from 'resource:///org/gnome/shell/ui/swipeTracker.js';
 import {TouchpadConstants} from '../constants.js';
 import {getWindowUnderPointer} from './utils/windowUnderPointer.js';
+import {getVirtualKeyboard} from './utils/keyboard.js';
+
+// how far (px) the drag has to keep pushing past a screen edge to snap the window
+const EDGE_SNAP_THRESHOLD = 80;
+
+type EdgeSnap = 'top' | 'left' | 'right';
 
 enum State {
     NONE = 0,
@@ -31,6 +39,10 @@ export class WindowDragGestureExtension implements ISubExtension {
     private _dragX = 0;
     private _dragY = 0;
     private _scale = 1;
+    private _overshootX = 0;
+    private _overshootY = 0;
+    private _snap?: EdgeSnap;
+    private _snapPreview?: St.Widget;
     private _pointer?: Clutter.VirtualInputDevice;
     private _pointerOffsetX = 0;
     private _pointerOffsetY = 0;
@@ -57,6 +69,8 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._cancelRestore();
         this._window = undefined;
         this._pointer = undefined;
+        this._snapPreview?.destroy();
+        this._snapPreview = undefined;
     }
 
     private _handleEvent(
@@ -122,18 +136,33 @@ export class WindowDragGestureExtension implements ISubExtension {
                     multiplier *
                     this._scale *
                     TouchpadConstants.WINDOW_DRAG_MULTIPLIER;
-                this._dragX += dx * speed;
-                this._dragY += dy * speed;
+                const moveX = dx * speed;
+                const moveY = dy * speed;
+                this._dragX += moveX;
+                this._dragY += moveY;
                 // while a maximized window is being restored, just collect the movement
-                if (!this._restoring) this._moveWindow();
+                if (!this._restoring) this._moveWindow(moveX, moveY);
                 break;
             }
             case Clutter.TouchpadGesturePhase.END:
-            case Clutter.TouchpadGesturePhase.CANCEL:
+            case Clutter.TouchpadGesturePhase.CANCEL: {
+                const window = this._window;
+                const snap = this._snap;
                 this._state = State.NONE;
                 this._cancelRestore();
                 this._window = undefined;
+                this._snapPreview?.hide();
+                this._snap = undefined;
+                this._overshootX = 0;
+                this._overshootY = 0;
+                if (
+                    window &&
+                    snap &&
+                    phase === Clutter.TouchpadGesturePhase.END
+                )
+                    this._applySnap(window, snap);
                 break;
+            }
         }
         return Clutter.EVENT_STOP;
     }
@@ -148,6 +177,9 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._window = window;
         this._dragX = 0;
         this._dragY = 0;
+        this._overshootX = 0;
+        this._overshootY = 0;
+        this._snap = undefined;
         if (this._needsRestore(window)) {
             // restore first; the drag starts from wherever the restored window lands
             this._restoring = true;
@@ -224,7 +256,7 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._cancelRestore();
         if (!window) return;
         this._setStartPosition(window);
-        this._moveWindow();
+        this._moveWindow(0, 0);
     }
 
     private _cancelRestore() {
@@ -239,7 +271,7 @@ export class WindowDragGestureExtension implements ISubExtension {
         this._restoring = false;
     }
 
-    private _moveWindow() {
+    private _moveWindow(moveX: number, moveY: number) {
         const window = this._window;
         if (!window) return;
 
@@ -253,6 +285,20 @@ export class WindowDragGestureExtension implements ISubExtension {
         const maxY = Math.max(area.y, area.y + area.height - rect.height);
         const x = Math.min(Math.max(this._startX + this._dragX, area.x), maxX);
         const y = Math.min(Math.max(this._startY + this._dragY, area.y), maxY);
+
+        // what the clamp swallowed is the push against the edge; it builds up while
+        // the drag keeps going that way and resets as soon as it moves back
+        this._overshootX = this._updateOvershoot(
+            this._overshootX,
+            moveX,
+            this._startX + this._dragX - x
+        );
+        this._overshootY = this._updateOvershoot(
+            this._overshootY,
+            moveY,
+            this._startY + this._dragY - y
+        );
+        this._updateSnap(area);
 
         // store the clamped offset so reversing direction responds immediately
         this._dragX = x - this._startX;
@@ -269,5 +315,63 @@ export class WindowDragGestureExtension implements ISubExtension {
             Math.round(x) + this._pointerOffsetX,
             Math.round(y) + this._pointerOffsetY
         );
+    }
+
+    private _updateOvershoot(current: number, move: number, excess: number) {
+        if (move === 0) return current;
+        if (excess === 0) return 0;
+        return Math.sign(current) === Math.sign(excess)
+            ? current + excess
+            : excess;
+    }
+
+    // top edge maximizes, left/right edge snaps to that half (like dragging by the titlebar)
+    private _updateSnap(area: Mtk.Rectangle) {
+        let snap: EdgeSnap | undefined;
+        if (this._overshootY <= -EDGE_SNAP_THRESHOLD) snap = 'top';
+        else if (this._overshootX <= -EDGE_SNAP_THRESHOLD) snap = 'left';
+        else if (this._overshootX >= EDGE_SNAP_THRESHOLD) snap = 'right';
+
+        if (snap === this._snap) return;
+        this._snap = snap;
+        if (!snap) {
+            this._snapPreview?.hide();
+            return;
+        }
+
+        const half = area.width / 2;
+        const box = {
+            top: [area.x, area.y, area.width, area.height],
+            left: [area.x, area.y, half, area.height],
+            right: [area.x + half, area.y, half, area.height],
+        }[snap];
+        if (!this._snapPreview) {
+            this._snapPreview = new St.Widget({
+                reactive: false,
+                style_class: 'tile-preview gie-tile-window-preview',
+                visible: false,
+            });
+            Main.layoutManager.uiGroup.add_child(this._snapPreview);
+        }
+        this._snapPreview.set_position(box[0], box[1]);
+        this._snapPreview.set_size(box[2], box[3]);
+        this._snapPreview.show();
+    }
+
+    private _applySnap(window: Meta.Window, snap: EdgeSnap) {
+        if (snap === 'top') {
+            window.maximize();
+            return;
+        }
+        // Super+Left/Right acts on the focused window, so focus the dragged one first
+        if (window !== global.display.get_focus_window())
+            Main.activateWindow(window);
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            getVirtualKeyboard().sendKeys([
+                Clutter.KEY_Super_L,
+                snap === 'left' ? Clutter.KEY_Left : Clutter.KEY_Right,
+            ]);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 }
